@@ -145,6 +145,7 @@ st.markdown(
             border-radius: 14px !important;
             font-weight: 700 !important;
             padding: 0.65rem 1rem !important;
+            margin-top: 1.7rem !important;
         }
 
         .pill {
@@ -373,30 +374,20 @@ def main():
 
     with right:
         st.markdown('<div class="panel">', unsafe_allow_html=True)
-        st.markdown('<div class="section-label">System status</div>', unsafe_allow_html=True)
-
-        if api_key:
-            st.success("Gemini API key loaded")
-        else:
-            st.error("Missing GEMINI_API_KEY in Streamlit Secrets")
-
-        if data_file:
-            st.success(f"Knowledge file loaded: {data_file}")
-        else:
-            st.error("Missing nfti_pages.jsonl in repo root or data/")
-
-        st.markdown('<div class="section-label" style="margin-top:18px;">What you can ask</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-label">Suggested questions</div>', unsafe_allow_html=True)
         st.markdown(
             """
-            <span class="pill">What is ClickOn?</span>
-            <span class="pill">Summarize this collection</span>
-            <span class="pill">What are the key features?</span>
-            <span class="pill">How does this project work?</span>
+            <div>
+                <span class="pill">What is ClickOn?</span>
+                <span class="pill">Summarize this collection</span>
+                <span class="pill">What are the key features?</span>
+                <span class="pill">How does this project work?</span>
+            </div>
             """,
             unsafe_allow_html=True,
         )
         st.markdown(
-            '<div class="footer-note">Nftify answers only from the indexed knowledge base and shows the supporting sources below.</div>',
+            '<div class="footer-note">Nftify answers from the indexed knowledge base and shows supporting sources below.</div>',
             unsafe_allow_html=True,
         )
         st.markdown('</div>', unsafe_allow_html=True)
@@ -409,8 +400,13 @@ def main():
             label_visibility="collapsed",
             placeholder="Ask a question about the NFT knowledge base...",
         )
-        top_k = st.slider("Sources to retrieve", min_value=3, max_value=8, value=5)
-        ask_clicked = st.button("Ask Nftify", type="primary", use_container_width=True)
+        controls_left, controls_right = st.columns([1, 1], gap="small")
+        with controls_left:
+            top_k = st.slider("Sources to retrieve", min_value=3, max_value=8, value=5)
+        with controls_right:
+            st.write("")
+            st.write("")
+            ask_clicked = st.button("Ask Nftify", type="primary", use_container_width=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
     if not api_key:
@@ -432,11 +428,6 @@ def main():
         st.exception(e)
         st.markdown('</div>', unsafe_allow_html=True)
         st.stop()
-
-    info1, info2, info3 = st.columns(3)
-    info1.metric("Records", row_count)
-    info2.metric("Indexed Chunks", chunk_count)
-    info3.metric("Model", "Gemini 2.5 Flash")
 
     if ask_clicked and query.strip():
         with st.spinner("Searching and composing answer..."):
