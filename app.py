@@ -363,7 +363,7 @@ def main():
             <div class="brand-badge">🤖</div>
             <div class="brand-text">
                 <h1>Nftify</h1>
-                <p>Ask about your NFT knowledge base and get grounded answers with source-backed context.</p>
+                <p>Explore Click-On Kaduna, DSFP, NFTI, and related resources through clear, trustworthy answers backed by verified program information..</p>
             </div>
         </div>
         """,
@@ -379,7 +379,6 @@ def main():
             """
             <div>
                 <span class="pill">What is ClickOn?</span>
-                <span class="pill">Summarize this collection</span>
                 <span class="pill">What are the key features?</span>
                 <span class="pill">How does this project work?</span>
             </div>
