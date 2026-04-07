@@ -360,7 +360,7 @@ def main():
     st.markdown(
         """
         <div class="brand">
-            <div class="brand-badge">🖼️</div>
+            <div class="brand-badge">🤖</div>
             <div class="brand-text">
                 <h1>Nftify</h1>
                 <p>Ask about your NFT knowledge base and get grounded answers with source-backed context.</p>
