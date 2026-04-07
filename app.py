@@ -460,7 +460,7 @@ def main():
             """
             <div class="empty-state">
                 <h3 style="margin-bottom:8px; color:white;">Start with a question</h3>
-                <div>Nftify will search your indexed NFT dataset, answer clearly, and show the supporting sources.</div>
+                <div>Nftify will search your indexed NFTI dataset, answer clearly, and show the supporting sources.</div>
             </div>
             """,
             unsafe_allow_html=True,
