@@ -1,6 +1,6 @@
 streamlit
-google-genai
 chromadb
+google-genai
 langchain-text-splitters
 sentence-transformers
-torch
+protobuf==3.20.3
