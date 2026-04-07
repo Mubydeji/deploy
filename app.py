@@ -1,16 +1,17 @@
+
 import os
 import json
+import hashlib
 from pathlib import Path
 
-import numpy as np
 import streamlit as st
 from google import genai
 from google.genai import errors as genai_errors
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+import chromadb
 from sentence_transformers import SentenceTransformer
 
 
-# ---------------- CONFIG ----------------
 st.set_page_config(
     page_title="Nftify",
     page_icon="🤖",
@@ -18,265 +19,414 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ---------------- STYLE ----------------
 st.markdown(
     """
     <style>
-        /* Remove Streamlit UI junk */
         [data-testid="stSidebar"],
         [data-testid="stSidebarNav"],
-        [data-testid="stSidebarCollapsedControl"],
-        div[data-testid="stToolbar"],
-        div[data-testid="stDecoration"] {
+        [data-testid="stSidebarCollapsedControl"] {
             display: none !important;
         }
 
-        header[data-testid="stHeader"] {
-            height: 0rem;
-        }
-
         .block-container {
-            max-width: 1100px;
-            padding-top: 0.5rem !important;
-            padding-bottom: 1.5rem;
+            max-width: 980px;
+            padding-top: 1.5rem;
+            padding-bottom: 2rem;
         }
 
-        /* Header */
-        .brand-row {
+        .topbar {
             display: flex;
             align-items: center;
             gap: 14px;
-            margin-bottom: 0.6rem;
+            margin-bottom: 1rem;
+            padding: 0.25rem 0 0.75rem 0;
         }
 
-        .brand-logo {
-            width: 50px;
-            height: 50px;
+        .logo {
+            width: 46px;
+            height: 46px;
             border-radius: 14px;
             display: flex;
             align-items: center;
             justify-content: center;
             font-size: 24px;
             background: linear-gradient(135deg, #7c3aed, #2563eb);
+            box-shadow: 0 10px 28px rgba(37, 99, 235, 0.28);
+            flex-shrink: 0;
         }
 
         .brand-title {
             color: white;
             font-size: 2rem;
             font-weight: 800;
+            line-height: 1;
             margin: 0;
         }
 
         .brand-subtitle {
-            color: #c4cae0;
-            font-size: 0.95rem;
+            color: #b5bfd9;
+            font-size: 0.98rem;
+            margin-top: 0.35rem;
         }
 
-        /* Panels */
-        .panel {
-            background: rgba(255,255,255,0.03);
-            border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 18px;
-            padding: 16px;
+        .helper {
+            color: #9aa5ce;
+            font-size: 0.9rem;
+            margin-top: 0.4rem;
         }
 
-        .section-label {
-            color: #a5b4fc;
-            font-size: 0.8rem;
-            font-weight: 700;
-            margin-bottom: 8px;
-        }
-
-        /* Chips */
-        .chip-grid {
+        .chips {
             display: flex;
             flex-wrap: wrap;
             gap: 8px;
+            margin: 0.75rem 0 1.25rem 0;
         }
 
         .chip {
+            display: inline-block;
             padding: 8px 12px;
             border-radius: 999px;
-            background: rgba(99, 102, 241, 0.1);
+            background: rgba(99, 102, 241, 0.10);
             border: 1px solid rgba(129, 140, 248, 0.18);
-            color: #dce2ff;
+            color: #d6dcff;
             font-size: 0.9rem;
         }
 
-        /* Inputs */
-        .stTextArea textarea {
-            border-radius: 14px !important;
-        }
-
-        div[data-testid="stButton"] > button {
-            border-radius: 12px !important;
-            font-weight: 600 !important;
-        }
-
-        /* Sources */
         .source-card {
             background: rgba(255,255,255,0.03);
             border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 14px;
-            padding: 12px;
-            margin-bottom: 8px;
+            border-radius: 16px;
+            padding: 14px 16px;
+            margin-bottom: 10px;
         }
 
         .source-title {
-            font-weight: 600;
+            font-weight: 700;
+            margin-bottom: 6px;
             color: white;
         }
 
         .source-url {
-            font-size: 0.85rem;
-            color: #9aa5ce;
+            font-size: 0.88rem;
+            color: #a8b2d4;
+            margin-bottom: 8px;
+            word-break: break-all;
         }
 
+        .empty-wrap {
+            border: 1px dashed rgba(255,255,255,0.12);
+            border-radius: 18px;
+            padding: 2.2rem 1.25rem;
+            text-align: center;
+            color: #b8c0e0;
+            margin-top: 1rem;
+        }
+
+        .stChatMessage {
+            border-radius: 18px;
+        }
+
+        a {
+            color: #93c5fd !important;
+        }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-# ---------------- DATA ----------------
 DATA_CANDIDATES = [
     Path("nfti_pages.jsonl"),
     Path("data/nfti_pages.jsonl"),
 ]
 
-def get_api_key():
+EMBED_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+
+
+def get_api_key() -> str | None:
     return st.secrets.get("GEMINI_API_KEY", os.getenv("GEMINI_API_KEY"))
 
-def find_data_file():
-    for p in DATA_CANDIDATES:
-        if p.exists():
-            return p
+
+def find_data_file() -> Path | None:
+    for path in DATA_CANDIDATES:
+        if path.exists():
+            return path
     return None
 
-def load_jsonl(path):
-    return [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
 
-def row_to_text(row):
-    return (
-        f"{row.get('title','')}\n{row.get('content','')}",
-        {"title": row.get("title",""), "url": row.get("url","")}
+def load_jsonl(path: Path) -> list[dict]:
+    rows = []
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            rows.append(json.loads(line))
+    return rows
+
+
+def row_to_text(row: dict) -> tuple[str, dict]:
+    title = row.get("title") or row.get("name") or row.get("heading") or "Untitled"
+    url = row.get("url") or row.get("source") or ""
+    content = (
+        row.get("content")
+        or row.get("text")
+        or row.get("body")
+        or row.get("description")
+        or ""
+    )
+    metadata = {
+        "title": title,
+        "url": url,
+        "source": url or title,
+    }
+    text = f"Title: {title}\nURL: {url}\n\n{content}".strip()
+    return text, metadata
+
+
+@st.cache_resource(show_spinner=False)
+def get_embedder():
+    return SentenceTransformer(EMBED_MODEL_NAME)
+
+
+@st.cache_resource(show_spinner=True)
+def build_collection(data_file: str):
+    path = Path(data_file)
+    rows = load_jsonl(path)
+
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=900,
+        chunk_overlap=150,
+        separators=["\n\n", "\n", ". ", " ", ""],
     )
 
-@st.cache_resource
-def get_embedder():
-    return SentenceTransformer("all-MiniLM-L6-v2")
+    embedder = get_embedder()
+    client = chromadb.Client()
+    collection_name = "nftify_" + hashlib.md5(str(path.resolve()).encode()).hexdigest()[:12]
+    collection = client.create_collection(name=collection_name)
 
-@st.cache_resource
-def build_index(file):
-    rows = load_jsonl(Path(file))
-    splitter = RecursiveCharacterTextSplitter(chunk_size=900, chunk_overlap=150)
+    documents = []
+    metadatas = []
+    ids = []
 
-    docs, metas = [], []
+    idx = 0
+    for row in rows:
+        text, metadata = row_to_text(row)
+        for chunk in splitter.split_text(text):
+            documents.append(chunk)
+            metadatas.append(metadata)
+            ids.append(f"doc_{idx}")
+            idx += 1
 
-    for r in rows:
-        text, meta = row_to_text(r)
-        for c in splitter.split_text(text):
-            docs.append(c)
-            metas.append(meta)
+    embeddings = embedder.encode(documents, show_progress_bar=False).tolist()
 
-    emb = np.array(get_embedder().encode(docs), dtype=np.float32)
-    emb /= np.linalg.norm(emb, axis=1, keepdims=True)
+    collection.add(
+        ids=ids,
+        documents=documents,
+        metadatas=metadatas,
+        embeddings=embeddings,
+    )
 
-    return {"docs": docs, "metas": metas, "emb": emb}
+    return collection
 
-def retrieve(index, query, k=5):
-    q = get_embedder().encode([query])[0]
-    q /= np.linalg.norm(q)
-    scores = index["emb"] @ q
-    idx = np.argsort(scores)[::-1][:k]
 
-    return {
-        "documents": [[index["docs"][i] for i in idx]],
-        "metadatas": [[index["metas"][i] for i in idx]],
-    }
+def retrieve(collection, query: str, n_results: int = 5) -> dict:
+    embedder = get_embedder()
+    query_embedding = embedder.encode([query], show_progress_bar=False).tolist()[0]
+    return collection.query(
+        query_embeddings=[query_embedding],
+        n_results=n_results,
+    )
 
-def render_sources(res):
-    for i, doc in enumerate(res["documents"][0]):
-        meta = res["metadatas"][0][i]
-        st.markdown(f"""
-        <div class="source-card">
-            <div class="source-title">{i+1}. {meta.get("title","")}</div>
-            <div class="source-url">{meta.get("url","")}</div>
-            {doc[:200]}...
-        </div>
-        """, unsafe_allow_html=True)
 
-# ---------------- APP ----------------
-def main():
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-        st.session_state.sources = {}
+def build_history_text(messages: list[dict], limit: int = 6) -> str:
+    recent = messages[-limit:]
+    lines = []
+    for msg in recent:
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+        if content:
+            lines.append(f"{role.title()}: {content}")
+    return "\n".join(lines)
 
-    api = get_api_key()
-    data = find_data_file()
 
-    # Header
-    st.markdown("""
-    <div class="brand-row">
-        <div class="brand-logo">🤖</div>
-        <div>
-            <div class="brand-title">Nftify</div>
-            <div class="brand-subtitle">Ask your NFT knowledge base</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+def build_prompt(query: str, results: dict, messages: list[dict]) -> str:
+    docs = results.get("documents", [[]])[0]
+    metas = results.get("metadatas", [[]])[0]
 
-    if not api or not data:
-        st.error("Missing API key or dataset")
+    context_blocks = []
+    for i, doc in enumerate(docs):
+        meta = metas[i] if i < len(metas) else {}
+        title = meta.get("title", f"Source {i+1}")
+        url = meta.get("url", "")
+        context_blocks.append(
+            f"[Source {i+1}]\nTitle: {title}\nURL: {url}\nContent:\n{doc}"
+        )
+
+    history_text = build_history_text(messages)
+    context = "\n\n".join(context_blocks)
+
+    return f"""
+You are Nftify, a grounded assistant for an NFT knowledge base.
+
+Instructions:
+- Answer using the retrieved context first.
+- Use the recent conversation only to maintain continuity.
+- Be concise, clear, and direct.
+- If the context is insufficient, say so clearly.
+- Do not invent facts.
+
+Recent conversation:
+{history_text}
+
+Knowledge base context:
+{context}
+
+User question:
+{query}
+""".strip()
+
+
+def generate_answer(client, query: str, results: dict, messages: list[dict]) -> str:
+    prompt = build_prompt(query, results, messages)
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt,
+    )
+    return response.text if getattr(response, "text", None) else "No answer returned."
+
+
+def render_sources(results: dict):
+    docs = results.get("documents", [[]])[0]
+    metas = results.get("metadatas", [[]])[0]
+
+    if not docs:
+        st.info("No sources found.")
         return
 
-    index = build_index(str(data))
-    client = genai.Client(api_key=api)
+    for i, doc in enumerate(docs):
+        meta = metas[i] if i < len(metas) else {}
+        title = meta.get("title", f"Source {i+1}")
+        url = meta.get("url", "")
+        snippet = doc[:320].strip()
 
-    # Input
-    col1, col2 = st.columns([2,1])
-
-    with col1:
-        query = st.text_area("", placeholder="Ask something...")
-        ask = st.button("Ask Nftify", use_container_width=True)
-
-    with col2:
-        st.markdown('<div class="panel">', unsafe_allow_html=True)
-        st.markdown('<div class="section-label">Examples</div>', unsafe_allow_html=True)
-        st.markdown("""
-        <div class="chip-grid">
-            <span class="chip">What is ClickOn?</span>
-            <span class="chip">Summarize this</span>
-            <span class="chip">Key features?</span>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown('<div class="source-card">', unsafe_allow_html=True)
+        st.markdown(f'<div class="source-title">{i+1}. {title}</div>', unsafe_allow_html=True)
+        if url:
+            st.markdown(
+                f'<div class="source-url"><a href="{url}" target="_blank">{url}</a></div>',
+                unsafe_allow_html=True,
+            )
+        st.write(snippet + ("..." if len(doc) > 320 else ""))
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # Run
-    if ask and query:
-        st.session_state.messages.append(("user", query))
 
-        res = retrieve(index, query)
-        prompt = query + "\n\n" + "\n".join(res["documents"][0])
+def init_state():
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+    if "source_map" not in st.session_state:
+        st.session_state.source_map = {}
 
-        try:
-            r = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=prompt
-            )
-            ans = r.text
-        except Exception:
-            ans = "Error or quota exceeded"
 
-        st.session_state.messages.append(("bot", ans))
-        st.session_state.sources[len(st.session_state.messages)] = res
+def main():
+    init_state()
 
-    # Chat display
-    for i, (role, msg) in enumerate(st.session_state.messages):
-        with st.chat_message("user" if role=="user" else "assistant"):
-            st.write(msg)
-            if role == "bot" and i in st.session_state.sources:
+    api_key = get_api_key()
+    data_file = find_data_file()
+
+    st.markdown(
+        """
+        <div class="topbar">
+            <div class="logo">🖼️</div>
+            <div>
+                <div class="brand-title">Nftify</div>
+                <div class="brand-subtitle">Chat with your knowledge base.</div>
+                <div class="helper">Answers are grounded in your indexed content and can continue across turns.</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
+        <div class="chips">
+            <span class="chip">What is ClickOn?</span>
+            <span class="chip">Summarize this collection</span>
+            <span class="chip">What are the key features?</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if not api_key:
+        st.error("Missing GEMINI_API_KEY in Streamlit Secrets.")
+        st.stop()
+
+    if not data_file:
+        st.error("Missing nfti_pages.jsonl in repo root or data folder.")
+        st.stop()
+
+    client = genai.Client(api_key=api_key)
+    collection = build_collection(str(data_file))
+
+    if not st.session_state.messages:
+        st.markdown(
+            """
+            <div class="empty-wrap">
+                <h3 style="margin-bottom:8px; color:white;">Start the conversation</h3>
+                <div>Ask Nftify a question and continue naturally with follow-ups.</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    for idx, msg in enumerate(st.session_state.messages):
+        with st.chat_message("user" if msg["role"] == "user" else "assistant"):
+            st.markdown(msg["content"])
+            if msg["role"] == "assistant" and idx in st.session_state.source_map:
                 with st.expander("Sources"):
-                    render_sources(st.session_state.sources[i])
+                    render_sources(st.session_state.source_map[idx])
+
+    query = st.chat_input("Ask Nftify anything about your knowledge base")
+
+    if query:
+        st.session_state.messages.append({"role": "user", "content": query})
+        with st.chat_message("user"):
+            st.markdown(query)
+
+        with st.chat_message("assistant"):
+            try:
+                with st.spinner("Thinking..."):
+                    results = retrieve(collection, query=query, n_results=5)
+                    answer = generate_answer(
+                        client=client,
+                        query=query,
+                        results=results,
+                        messages=st.session_state.messages[:-1],
+                    )
+
+                st.markdown(answer)
+                assistant_index = len(st.session_state.messages)
+                st.session_state.messages.append({"role": "assistant", "content": answer})
+                st.session_state.source_map[assistant_index] = results
+
+                with st.expander("Sources"):
+                    render_sources(results)
+
+            except genai_errors.ClientError as e:
+                msg = str(e)
+                if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
+                    error_text = "Gemini quota is exhausted for this API key. Try again later or switch to a billed key."
+                else:
+                    error_text = f"Gemini request failed: {e}"
+
+                st.error(error_text)
+                st.session_state.messages.append({"role": "assistant", "content": error_text})
+
+            except Exception as e:
+                error_text = f"Something went wrong: {e}"
+                st.error(error_text)
+                st.session_state.messages.append({"role": "assistant", "content": error_text})
 
 
 if __name__ == "__main__":
