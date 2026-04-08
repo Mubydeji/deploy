@@ -378,9 +378,8 @@ def main():
         st.markdown(
             """
             <div>
+                <span class="pill">What is NFTI?</span>
                 <span class="pill">What is ClickOn?</span>
-                <span class="pill">What are the key features?</span>
-                <span class="pill">How does this project work?</span>
             </div>
             """,
             unsafe_allow_html=True,
