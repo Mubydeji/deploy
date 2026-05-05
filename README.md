@@ -85,7 +85,7 @@ Fine-tuning is expensive, slow to update, and still hallucinates. RAG is modular
 Fast, lightweight, and strong on semantic similarity for short to medium text chunks. Runs without a GPU.
 
 **Why ChromaDB?**
-Simple, in-memory, no infrastructure required. Right tool for a focused single-domain knowledge base at this scale.
+Simple and infrastructure-free. Currently configured as an in-memory store — the index rebuilds from the JSONL knowledge base on each server session. Streamlit's @st.cache_resource decorator ensures the index is shared across users and only rebuilt on cold start, not on every query. A persistent ChromaDB client is the next planned upgrade.
 
 **Why chunk overlap?**
 Answers often span chunk boundaries. 150-character overlap ensures no key sentence is split across two non-adjacent chunks.
